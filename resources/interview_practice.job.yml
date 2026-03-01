@@ -1,0 +1,56 @@
+resources:
+  jobs:
+    interview_practice:
+      name: "[${bundle.target}] Interview Practice — All Scenarios"
+
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/00_setup.py
+
+        - task_key: delta_lake
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/01_delta_lake.py
+
+        - task_key: spark_perf
+          depends_on:
+            - task_key: delta_lake
+          notebook_task:
+            notebook_path: ../src/notebooks/02_spark_perf.py
+
+        - task_key: streaming
+          depends_on:
+            - task_key: spark_perf
+          notebook_task:
+            notebook_path: ../src/notebooks/03_streaming.py
+
+        - task_key: data_quality
+          depends_on:
+            - task_key: streaming
+          notebook_task:
+            notebook_path: ../src/notebooks/04_data_quality.py
+
+        - task_key: medallion
+          depends_on:
+            - task_key: data_quality
+          notebook_task:
+            notebook_path: ../src/notebooks/05_medallion.py
+
+        - task_key: orchestration
+          depends_on:
+            - task_key: medallion
+          notebook_task:
+            notebook_path: ../src/notebooks/06_orchestration.py
+
+        - task_key: teardown
+          depends_on:
+            - task_key: orchestration
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: ../src/notebooks/99_teardown.py
+
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
