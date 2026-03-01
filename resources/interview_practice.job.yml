@@ -51,6 +51,3 @@ resources:
           notebook_task:
             notebook_path: ../src/notebooks/99_teardown.py
 
-      permissions:
-        - level: CAN_VIEW
-          group_name: "users"

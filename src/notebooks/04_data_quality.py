@@ -75,13 +75,13 @@ query = (
     spark.readStream
     .format("cloudFiles")
     .option("cloudFiles.format", "json")
-    .option("cloudFiles.schemaLocation", f"/tmp/{SCHEMA}/schema_store")
+    .option("cloudFiles.schemaLocation", f"dbfs:/tmp/{SCHEMA}/schema_store")
     .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
     .option("cloudFiles.inferColumnTypes", "true")
     .load(VOLUME_PATH)
     .writeStream
     .format("delta")
-    .option("checkpointLocation", f"/tmp/{SCHEMA}/checkpoint")
+    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint")
     .option("mergeSchema", "true")
     .trigger(availableNow=True)
     .toTable(f"{SCHEMA}.bronze_users")

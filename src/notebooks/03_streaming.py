@@ -18,6 +18,31 @@
 # MAGIC %md
 # MAGIC ## Scenario 3A — Late-Arriving Data Breaking Watermarks
 # MAGIC **Customer says:** "Our streaming aggregations are missing events that arrive late — sometimes events come in 2 hours after they happened."
+# MAGIC
+# MAGIC ### What's happening under the hood
+# MAGIC
+# MAGIC Structured Streaming tracks two timestamps per query:
+# MAGIC - **Event time:** the timestamp embedded in the data (when the event actually happened)
+# MAGIC - **Processing time:** wall-clock time when Spark received the record
+# MAGIC
+# MAGIC The **watermark** is the boundary between "windows that might still receive late data"
+# MAGIC and "windows that are finalized and can be emitted." Spark computes it as:
+# MAGIC
+# MAGIC ```
+# MAGIC watermark = max(event_time seen so far) - watermark_delay
+# MAGIC ```
+# MAGIC
+# MAGIC Any window whose **end timestamp < watermark** is finalized: Spark emits the result
+# MAGIC and drops the state. Any event arriving after its window has been finalized is
+# MAGIC silently discarded — it will never appear in the output.
+# MAGIC
+# MAGIC **Why a tight watermark breaks things:** If `watermark_delay = "10 minutes"` and
+# MAGIC an event arrives 2 hours late, its window was finalized 1h50m ago. The event is
+# MAGIC dropped without error, producing silently incorrect aggregation totals.
+# MAGIC
+# MAGIC **Stakeholder translation:** "We told the pipeline to wait 10 minutes for stragglers.
+# MAGIC But some data is 2 hours late, so by the time it arrives, we've already published
+# MAGIC that hour's totals and thrown away the in-progress state for it."
 
 # COMMAND ----------
 
@@ -53,7 +78,7 @@ schema = StructType([
 all_events = spark.createDataFrame(on_time + late_events, schema)
 all_events.write.format("delta").mode("overwrite").saveAsTable(f"{SCHEMA}.raw_events")
 
-# Pre-create output table to avoid schema inference errors
+# Pre-create output table to avoid schema inference errors on first run
 spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {SCHEMA}.hourly_agg
     (window STRUCT<start:TIMESTAMP,end:TIMESTAMP>, total_value DOUBLE)
@@ -68,10 +93,17 @@ spark.sql(f"""
 # COMMAND ----------
 
 # Wrong: tight watermark drops late events
-# .withWatermark("event_time", "10 minutes")  ← events 3h late are discarded
+# .withWatermark("event_time", "10 minutes")  ← events 3h late are silently discarded
 
-# Check: streamingQuery.recentProgress["eventTime"] shows max seen vs watermark gap
-# Look at processingTime vs eventTime lag to size the watermark correctly
+# ── How to size a watermark correctly ─────────────────────────────────────────
+# 1. Check streamingQuery.recentProgress — look at eventTime.watermark and
+#    eventTime.max. The gap between them should be >= your worst-case lateness.
+# 2. Look at your source system's SLA: "events are guaranteed within X hours"
+# 3. When in doubt, size wider. A wider watermark uses more state memory but
+#    produces correct results. A tight watermark produces fast but wrong results.
+#
+# Monitoring command while the query runs:
+#   spark.streams.active[0].recentProgress
 
 # COMMAND ----------
 
@@ -84,14 +116,21 @@ stream_df = spark.readStream.table(f"{SCHEMA}.raw_events")
 
 query = (
     stream_df
-    .withWatermark("event_time", "3 hours")      # wide enough to capture 3h-late events
+    # Watermark of 3 hours means: finalize a window only after we've seen
+    # event_time values that are 3+ hours newer than that window's end.
+    # This retains in-memory state for all windows that might still receive data.
+    .withWatermark("event_time", "3 hours")
     .groupBy(window("event_time", "1 hour"))
     .agg(sum("value").alias("total_value"))
     .writeStream
     .format("delta")
+    # append mode: only emit a window result once it's finalized (end < watermark).
+    # update mode would re-emit partial results every micro-batch — wrong for dashboards.
     .outputMode("append")
-    .option("checkpointLocation", f"/tmp/{SCHEMA}/checkpoint_late")
-    .trigger(availableNow=True)                   # batch-style: drain all data then stop
+    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint_late")
+    # availableNow: process all available data in one batch, then stop.
+    # Equivalent to a triggered batch run — useful for scheduled jobs.
+    .trigger(availableNow=True)
     .toTable(f"{SCHEMA}.hourly_agg")
 )
 query.awaitTermination()
@@ -104,6 +143,33 @@ print("✅ Scenario 3A complete")
 # MAGIC %md
 # MAGIC ## Scenario 3B — Checkpoint Corruption / Reprocessing
 # MAGIC **Customer says:** "Our streaming job crashed and when it restarted it reprocessed old data and created duplicates."
+# MAGIC
+# MAGIC ### What's happening under the hood
+# MAGIC
+# MAGIC A Structured Streaming checkpoint stores two things:
+# MAGIC 1. **Offsets:** the position in the source where the query last committed
+# MAGIC    (e.g., for a Delta source, this is the Delta table version number).
+# MAGIC 2. **State:** in-memory aggregation state (watermark position, partial window sums).
+# MAGIC
+# MAGIC Without a checkpoint, Spark has no memory of what it already processed. On restart
+# MAGIC it reads the source from the beginning (or from the latest offset, depending on
+# MAGIC source config) — potentially reprocessing and re-appending rows it already wrote.
+# MAGIC
+# MAGIC **Why duplicates appear even with a checkpoint:**
+# MAGIC If the job crashes *after* processing a micro-batch but *before* committing the
+# MAGIC checkpoint, Spark replays that batch on restart. With a plain `append` write,
+# MAGIC that batch is written twice → duplicates.
+# MAGIC
+# MAGIC **The fix — two-part guarantee:**
+# MAGIC - `checkpointLocation` on a durable filesystem (DBFS, not /tmp) ensures offsets
+# MAGIC   survive executor restarts.
+# MAGIC - `foreachBatch` + `MERGE INTO` makes each micro-batch write **idempotent**:
+# MAGIC   the same event_id can arrive multiple times but will only produce one row
+# MAGIC   in the output table.
+# MAGIC
+# MAGIC **Stakeholder translation:** "We added a bookmark so the pipeline remembers where
+# MAGIC it left off, and we changed the write pattern so that replaying a batch produces
+# MAGIC the same result as running it once."
 
 # COMMAND ----------
 
@@ -136,7 +202,9 @@ spark.sql(f"""
 
 # stream_df = spark.readStream.table(f"{SCHEMA}.source_events")
 # stream_df.writeStream.format("delta").outputMode("append").start(f"{SCHEMA}.output_events")
-# ^ Missing checkpointLocation = reprocesses ALL data on every restart → duplicates
+# ^ Two problems:
+#   1. No checkpointLocation → on restart, Spark has no offset record; replays from start
+#   2. Plain append → each replay adds duplicate rows; no deduplication at write time
 
 # COMMAND ----------
 
@@ -148,7 +216,13 @@ spark.sql(f"""
 stream_df = spark.readStream.table(f"{SCHEMA}.source_events")
 
 def upsert_to_delta(batch_df, batch_id):
+    # foreachBatch gives us a regular DataFrame for each micro-batch.
+    # We register it as a temp view so we can reference it in SQL.
     batch_df.createOrReplaceTempView("updates")
+    # MERGE INTO is the key to idempotency:
+    # - If event_id already exists → do nothing (WHEN MATCHED is omitted)
+    # - If event_id is new → insert it
+    # Running this function twice with the same batch produces identical output.
     spark.sql(f"""
         MERGE INTO {SCHEMA}.output_events t
         USING updates u ON t.event_id = u.event_id
@@ -159,7 +233,9 @@ query = (
     stream_df
     .writeStream
     .foreachBatch(upsert_to_delta)
-    .option("checkpointLocation", f"/tmp/{SCHEMA}/checkpoint_merge")
+    # checkpointLocation must be on a durable, distributed filesystem (dbfs:/ or /Volumes/).
+    # Local /tmp/ is wiped when the executor is recycled — defeats the purpose.
+    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint_merge")
     .trigger(availableNow=True)
     .start()
 )
