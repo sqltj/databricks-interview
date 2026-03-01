@@ -40,6 +40,37 @@ print(f"✅ Working in: {CATALOG}.{SCHEMA}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Serverless Diagnostic Toolkit
+# MAGIC
+# MAGIC > **On serverless there is no Spark UI.** Use these instead.
+# MAGIC
+# MAGIC | Goal | Command | Replaces |
+# MAGIC |------|---------|---------|
+# MAGIC | See the query execution plan | `df.explain("formatted")` | DAG / Stages tab |
+# MAGIC | Check join strategy chosen | Look for `BroadcastHashJoin` vs `SortMergeJoin` in plan | Stages → shuffle size |
+# MAGIC | Stage timings, shuffle bytes | Click **query profile bar** under cell output | Stages tab |
+# MAGIC | File count and avg file size | `DESCRIBE DETAIL table` → `numFiles`, `sizeInBytes` | Storage UI |
+# MAGIC | Confirm AQE is on (it is by default) | `spark.conf.get("spark.sql.adaptive.enabled")` | N/A |
+# MAGIC | Diagnose data skew | `df.groupBy("key").count().orderBy(desc("count")).show(10)` | Task duration histogram |
+# MAGIC | Rebuild file statistics for better plans | `ANALYZE TABLE t COMPUTE STATISTICS FOR ALL COLUMNS` | N/A |
+# MAGIC
+# MAGIC **Mental model shift:** On classic clusters you tune at the *executor level* (heap, GC, task count).
+# MAGIC On serverless you tune at the *data level* — file sizes, key distribution, join strategy, query plan.
+# MAGIC The cluster manages itself; your job is to give it good data and good queries.
+# MAGIC
+# MAGIC ### The 5 performance problems you can solve on serverless
+# MAGIC
+# MAGIC | Problem | Signal | Fix |
+# MAGIC |---------|--------|-----|
+# MAGIC | **Data skew** | Top key has 10x+ more rows than others | AQE (default on) or manual salting |
+# MAGIC | **Small files** | `numFiles` in thousands, avg size < 32 MB | `OPTIMIZE table ZORDER BY (col)` |
+# MAGIC | **Wrong join strategy** | `SortMergeJoin` in plan for a small table | `broadcast()` hint |
+# MAGIC | **Full table scan** | `DataFilters` applied *above* `FileScan` in plan | `OPTIMIZE ZORDER BY (filter_col)` |
+# MAGIC | **Bad query plans** | Unexpected join order or missing broadcast | `ANALYZE TABLE ... COMPUTE STATISTICS` |
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Step 1 — Generate Synthetic Dataset
 # MAGIC
 # MAGIC > See `00_data_generator.py` for ready-made domain templates

@@ -22,6 +22,8 @@ schemas = [
     "delta_time_travel",         # 1C — accidental delete / restore
     "spark_data_skew",           # 2A — data skew
     "spark_oom_spill",           # 2B — OOM / shuffle spill
+    "spark_small_files",         # 2C — small files degrading scan performance
+    "spark_filter_pushdown",     # 2E — missing filter pushdown / Z-ORDER
     "streaming_late_data",       # 3A — late-arriving data
     "streaming_checkpoints",     # 3B — checkpoint / reprocessing
     "ingestion_autoloader",      # 4A — Auto Loader schema drift
