@@ -54,6 +54,7 @@ from pyspark.sql.types import StructType, StructField, IntegerType, TimestampTyp
 CATALOG = "interview_practice"
 SCHEMA_NAME = "streaming_late_data"
 SCHEMA = f"{CATALOG}.{SCHEMA_NAME}"
+CHECKPOINT_BASE = "streaming_late_data"  # For checkpoint paths (no dots)
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
 print(f"✅ Writing to: {SCHEMA}")
@@ -127,7 +128,7 @@ query = (
     # append mode: only emit a window result once it's finalized (end < watermark).
     # update mode would re-emit partial results every micro-batch — wrong for dashboards.
     .outputMode("append")
-    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint_late")
+    .option("checkpointLocation", f"dbfs:/tmp/{CHECKPOINT_BASE}/checkpoint_late")
     # availableNow: process all available data in one batch, then stop.
     # Equivalent to a triggered batch run — useful for scheduled jobs.
     .trigger(availableNow=True)
@@ -176,6 +177,7 @@ print("✅ Scenario 3A complete")
 CATALOG = "interview_practice"
 SCHEMA_NAME = "streaming_checkpoints"
 SCHEMA = f"{CATALOG}.{SCHEMA_NAME}"
+CHECKPOINT_BASE = "streaming_checkpoints"  # For checkpoint paths (no dots)
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
 print(f"✅ Writing to: {SCHEMA}")
@@ -235,7 +237,7 @@ query = (
     .foreachBatch(upsert_to_delta)
     # checkpointLocation must be on a durable, distributed filesystem (dbfs:/ or /Volumes/).
     # Local /tmp/ is wiped when the executor is recycled — defeats the purpose.
-    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint_merge")
+    .option("checkpointLocation", f"dbfs:/tmp/{CHECKPOINT_BASE}/checkpoint_merge")
     .trigger(availableNow=True)
     .start()
 )
