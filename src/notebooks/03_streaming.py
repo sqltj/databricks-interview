@@ -54,9 +54,11 @@ from pyspark.sql.types import StructType, StructField, IntegerType, TimestampTyp
 CATALOG = "interview_practice"
 SCHEMA_NAME = "streaming_late_data"
 SCHEMA = f"{CATALOG}.{SCHEMA_NAME}"
-CHECKPOINT_BASE = "streaming_late_data"  # For checkpoint paths (no dots)
+# Checkpoints use Unity Catalog Volumes — DBFS root is disabled in this workspace
+CHECKPOINT_BASE = f"/Volumes/{CATALOG}/{SCHEMA_NAME}/checkpoints"
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {SCHEMA}.checkpoints")
 print(f"✅ Writing to: {SCHEMA}")
 
 on_time = [
@@ -128,7 +130,7 @@ query = (
     # append mode: only emit a window result once it's finalized (end < watermark).
     # update mode would re-emit partial results every micro-batch — wrong for dashboards.
     .outputMode("append")
-    .option("checkpointLocation", f"dbfs:/tmp/{CHECKPOINT_BASE}/checkpoint_late")
+    .option("checkpointLocation", f"{CHECKPOINT_BASE}/checkpoint_late")
     # availableNow: process all available data in one batch, then stop.
     # Equivalent to a triggered batch run — useful for scheduled jobs.
     .trigger(availableNow=True)
@@ -177,9 +179,10 @@ print("✅ Scenario 3A complete")
 CATALOG = "interview_practice"
 SCHEMA_NAME = "streaming_checkpoints"
 SCHEMA = f"{CATALOG}.{SCHEMA_NAME}"
-CHECKPOINT_BASE = "streaming_checkpoints"  # For checkpoint paths (no dots)
+CHECKPOINT_BASE = f"/Volumes/{CATALOG}/{SCHEMA_NAME}/checkpoints"
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {SCHEMA}.checkpoints")
 print(f"✅ Writing to: {SCHEMA}")
 
 events = spark.range(5000).selectExpr(
@@ -237,7 +240,7 @@ query = (
     .foreachBatch(upsert_to_delta)
     # checkpointLocation must be on a durable, distributed filesystem (dbfs:/ or /Volumes/).
     # Local /tmp/ is wiped when the executor is recycled — defeats the purpose.
-    .option("checkpointLocation", f"dbfs:/tmp/{CHECKPOINT_BASE}/checkpoint_merge")
+    .option("checkpointLocation", f"{CHECKPOINT_BASE}/checkpoint_merge")
     .trigger(availableNow=True)
     .start()
 )
