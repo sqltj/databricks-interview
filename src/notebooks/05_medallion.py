@@ -113,7 +113,7 @@ customers_v1 = spark.createDataFrame([
     (2, "Bob",   "Silver", datetime.date(2024, 1, 1), datetime.date(9999, 12, 31), True),
 ], ["customer_id", "name", "tier", "effective_date", "end_date", "is_current"])
 
-customers_v1.write.format("delta").mode("overwrite").saveAsTable(f"{SCHEMA}.dim_customers")
+customers_v1.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{SCHEMA}.dim_customers")
 print("Initial state:")
 spark.table(f"{SCHEMA}.dim_customers").show()
 
