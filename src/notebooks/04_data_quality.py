@@ -31,7 +31,9 @@ spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
 print(f"✅ Writing to: {SCHEMA}")
 
 VOLUME_PATH = f"/Volumes/interview_practice/ingestion_autoloader/landing"
+CHECKPOINT_PATH = f"/Volumes/interview_practice/ingestion_autoloader/checkpoints"
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {SCHEMA}.landing")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {SCHEMA}.checkpoints")
 
 # V1 files — score is a float
 for i in range(5):
@@ -75,13 +77,13 @@ query = (
     spark.readStream
     .format("cloudFiles")
     .option("cloudFiles.format", "json")
-    .option("cloudFiles.schemaLocation", f"dbfs:/tmp/{SCHEMA}/schema_store")
+    .option("cloudFiles.schemaLocation", f"{CHECKPOINT_PATH}/schema_store")
     .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
     .option("cloudFiles.inferColumnTypes", "true")
     .load(VOLUME_PATH)
     .writeStream
     .format("delta")
-    .option("checkpointLocation", f"dbfs:/tmp/{SCHEMA}/checkpoint")
+    .option("checkpointLocation", f"{CHECKPOINT_PATH}/checkpoint")
     .option("mergeSchema", "true")
     .trigger(availableNow=True)
     .toTable(f"{SCHEMA}.bronze_users")
