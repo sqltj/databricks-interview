@@ -27,7 +27,7 @@
 # MAGIC | Stage timings + shuffle bytes | Click **query profile bar** under any cell output | Stages tab |
 # MAGIC | File count and avg file size | `DESCRIBE DETAIL table` → `numFiles`, `sizeInBytes` | Storage UI |
 # MAGIC | Diagnose data skew | `df.groupBy("key").count().orderBy(desc("count")).show(10)` | Task duration histogram |
-# MAGIC | Confirm AQE is on | `spark.conf.get("spark.sql.adaptive.enabled")` | N/A |
+# MAGIC | Confirm AQE is on | AQE is always on (serverless manages it — `spark.conf.get` throws `CONFIG_NOT_AVAILABLE`) | N/A |
 # MAGIC | Rebuild column statistics | `ANALYZE TABLE t COMPUTE STATISTICS FOR ALL COLUMNS` | N/A |
 # MAGIC
 # MAGIC **Mental model shift:** On classic clusters you tune at the *executor level* (heap, GC, task count).
@@ -118,8 +118,14 @@ df_customers = spark.table(f"{SCHEMA}.customers")
 # automatically splits it into sub-tasks that run in parallel.
 # On serverless, AQE is ENABLED BY DEFAULT — check before reaching for salting.
 # Trade-off: only kicks in after the shuffle completes, so you still pay shuffle cost.
-print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+try:
+    print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
+except Exception:
+    print("AQE enabled: True (serverless manages this — config not directly readable)")
+try:
+    spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+except Exception:
+    print("Note: AQE skew join is enabled by default on serverless (config is platform-managed)")
 result_aqe = df_transactions.join(df_customers, "customer_id")
 result_aqe.count()
 print("AQE result count:", result_aqe.count())
@@ -243,13 +249,20 @@ print("Broadcast join count:", result.count())
 # ── Option 2: More shuffle partitions (reduce per-partition memory pressure) ──
 # Default is 200. Doubling partition count halves per-task memory footprint.
 # Rule of thumb: aim for 100–200 MB per partition after the shuffle.
-spark.conf.set("spark.sql.shuffle.partitions", "400")
+try:
+    spark.conf.set("spark.sql.shuffle.partitions", "400")
+    print("shuffle.partitions set to 400")
+except Exception:
+    print("Note: shuffle.partitions is platform-managed on serverless (AQE auto-coalesces anyway)")
 
 # ── Option 3: AQE coalesce (auto-sizes partitions post-shuffle) ───────────────
 # AQE measures actual partition sizes after the shuffle and coalesces small ones.
-# Enable everywhere — zero downside on serverless.
-spark.conf.set("spark.sql.adaptive.enabled", "true")
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+# Always on in serverless — no action needed, but shown here for classic clusters.
+try:
+    spark.conf.set("spark.sql.adaptive.enabled", "true")
+    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+except Exception:
+    print("Note: AQE coalescePartitions is always enabled on serverless (platform-managed)")
 
 result2 = large.join(small, "category")
 print("AQE join count:", result2.count())
@@ -401,7 +414,11 @@ large.join(small, "category").explain("formatted")
 dim_detail = spark.sql(f"DESCRIBE DETAIL {SCHEMA}.dim_categories")
 dim_size_mb = dim_detail.collect()[0]["sizeInBytes"] / (1024 * 1024)
 print(f"\ndim_categories size: {dim_size_mb:.2f} MB")
-print(f"autoBroadcastJoinThreshold: {spark.conf.get('spark.sql.autoBroadcastJoinThreshold')} bytes (default 10MB)")
+try:
+    threshold = spark.conf.get("spark.sql.autoBroadcastJoinThreshold")
+    print(f"autoBroadcastJoinThreshold: {threshold} bytes (default 10MB)")
+except Exception:
+    print("autoBroadcastJoinThreshold: ~10MB default (serverless manages this — use DESCRIBE DETAIL to check table size)")
 # If dim_size_mb < 10 MB but Spark didn't broadcast → stats may be stale
 
 # COMMAND ----------
