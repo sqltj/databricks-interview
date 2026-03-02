@@ -51,3 +51,30 @@ resources:
           notebook_task:
             notebook_path: ../src/notebooks/99_teardown.py
 
+    interview_practice_streaming:
+      name: "[${bundle.target}] Interview Practice — Streaming & Downstream"
+      description: "Run only streaming task and dependent tasks (no setup/delta_lake/spark_perf/teardown)"
+
+      tasks:
+        - task_key: streaming
+          notebook_task:
+            notebook_path: ../src/notebooks/03_streaming.py
+
+        - task_key: data_quality
+          depends_on:
+            - task_key: streaming
+          notebook_task:
+            notebook_path: ../src/notebooks/04_data_quality.py
+
+        - task_key: medallion
+          depends_on:
+            - task_key: data_quality
+          notebook_task:
+            notebook_path: ../src/notebooks/05_medallion.py
+
+        - task_key: orchestration
+          depends_on:
+            - task_key: medallion
+          notebook_task:
+            notebook_path: ../src/notebooks/06_orchestration.py
+
