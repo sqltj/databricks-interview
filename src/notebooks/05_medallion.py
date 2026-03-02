@@ -96,7 +96,9 @@ print("✅ Scenario 5A complete")
 
 # COMMAND ----------
 
-from pyspark.sql.functions import current_date, lit
+from pyspark.sql.functions import current_date, lit, to_date
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, DateType, BooleanType
+import datetime
 
 CATALOG = "interview_practice"
 SCHEMA_NAME = "medallion_scd2"
@@ -105,10 +107,10 @@ spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
 print(f"✅ Writing to: {SCHEMA}")
 
-# Initial state
+# Initial state — use explicit DATE type to match current_date() in the SCD2 MERGE step
 customers_v1 = spark.createDataFrame([
-    (1, "Alice", "Gold",   "2024-01-01", "9999-12-31", True),
-    (2, "Bob",   "Silver", "2024-01-01", "9999-12-31", True),
+    (1, "Alice", "Gold",   datetime.date(2024, 1, 1), datetime.date(9999, 12, 31), True),
+    (2, "Bob",   "Silver", datetime.date(2024, 1, 1), datetime.date(9999, 12, 31), True),
 ], ["customer_id", "name", "tier", "effective_date", "end_date", "is_current"])
 
 customers_v1.write.format("delta").mode("overwrite").saveAsTable(f"{SCHEMA}.dim_customers")
@@ -141,7 +143,7 @@ new_records = updates.select(
     col("name"),
     col("tier"),
     current_date().alias("effective_date"),
-    lit("9999-12-31").alias("end_date"),
+    to_date(lit("9999-12-31")).alias("end_date"),
     lit(True).alias("is_current"),
 )
 new_records.write.format("delta").mode("append").saveAsTable(f"{SCHEMA}.dim_customers")
