@@ -53,10 +53,16 @@ resources:
 
     interview_practice_streaming:
       name: "[${bundle.target}] Interview Practice — Streaming & Downstream"
-      description: "Run only streaming task and dependent tasks (no setup/delta_lake/spark_perf/teardown)"
+      description: "Run setup + streaming and dependent tasks (no delta_lake/spark_perf/teardown)"
 
       tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/00_setup.py
+
         - task_key: streaming
+          depends_on:
+            - task_key: setup
           notebook_task:
             notebook_path: ../src/notebooks/03_streaming.py
 
