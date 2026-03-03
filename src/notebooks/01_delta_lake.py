@@ -57,7 +57,8 @@ df_v2.write.format("delta").mode("append").option("mergeSchema", "true").saveAsT
 
 # COMMAND ----------
 
-spark.sql(f"DESCRIBE HISTORY {SCHEMA}.bronze_users").show(truncate=False)
+history_df = spark.sql(f"DESCRIBE HISTORY {SCHEMA}.bronze_users")
+display(history_df.select("version", "timestamp", "operation", "operationParameters", "userName"))
 # Downstream job fails with AnalysisException: cannot resolve column
 # because it was reading with a hardcoded schema that doesn't include 'tier'
 
